@@ -255,24 +255,20 @@ impl DAPAccess for STLink<STLinkUSBDevice> {
     /// Reads the DAP register on the specified port and address.
     fn read_register(&mut self, port: PortType, addr: u16) -> Result<u32, DebugProbeError> {
         if (addr & 0xf0) == 0 || port != PortType::DebugPort {
-            if let PortType::AccessPort(port_number) = port {
-                self.select_ap(port_number as u8)?;
+            let mut delay = 2;
+            let mut error = DebugProbeError::NotImplemented("Unreachable");
+            while delay <= 256 {
+                match self.read_register_once(port, addr) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        log::warn!("Error reading register, retrying {:?}", e);
+                        error = e;
+                    }
+                }
+                std::thread::sleep_ms(delay);
+                delay *= delay;
             }
-
-            let port: u16 = port.into();
-
-            let cmd = vec![
-                commands::JTAG_COMMAND,
-                commands::JTAG_READ_DAP_REG,
-                (port & 0xFF) as u8,
-                ((port >> 8) & 0xFF) as u8,
-                (addr & 0xFF) as u8,
-                ((addr >> 8) & 0xFF) as u8,
-            ];
-            let mut buf = [0; 8];
-            self.send_jtag_command(cmd, &[], &mut buf, TIMEOUT)?;
-            // Unwrap is ok!
-            Ok((&buf[4..8]).pread_with(0, LE).unwrap())
+            Err(error)
         } else {
             Err(StlinkError::BlanksNotAllowedOnDPRegister.into())
         }
@@ -286,27 +282,20 @@ impl DAPAccess for STLink<STLinkUSBDevice> {
         value: u32,
     ) -> Result<(), DebugProbeError> {
         if (addr & 0xf0) == 0 || port != PortType::DebugPort {
-            if let PortType::AccessPort(port_number) = port {
-                self.select_ap(port_number as u8)?;
+            let mut delay = 2;
+            let mut error = DebugProbeError::NotImplemented("Unreachable");
+            while delay <= 256 {
+                match self.write_register_once(port, addr, value) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        log::warn!("Error writing register, retrying {:?}", e);
+                        error = e;
+                    }
+                }
+                std::thread::sleep_ms(delay);
+                delay *= delay;
             }
-
-            let port: u16 = port.into();
-
-            let cmd = vec![
-                commands::JTAG_COMMAND,
-                commands::JTAG_WRITE_DAP_REG,
-                (port & 0xFF) as u8,
-                ((port >> 8) & 0xFF) as u8,
-                (addr & 0xFF) as u8,
-                ((addr >> 8) & 0xFF) as u8,
-                (value & 0xFF) as u8,
-                ((value >> 8) & 0xFF) as u8,
-                ((value >> 16) & 0xFF) as u8,
-                ((value >> 24) & 0xFF) as u8,
-            ];
-            let mut buf = [0; 2];
-            self.send_jtag_command(cmd, &[], &mut buf, TIMEOUT)?;
-            Ok(())
+            Err(error)
         } else {
             Err(StlinkError::BlanksNotAllowedOnDPRegister.into())
         }
@@ -339,6 +328,58 @@ impl<D: StLinkUsb> STLink<D> {
 
     /// Firmware version that adds multiple AP support.
     const MIN_JTAG_VERSION_MULTI_AP: u8 = 28;
+
+    /// Reads the DAP register on the specified port and address.
+    pub fn read_register_once(&mut self, port: PortType, addr: u16) -> Result<u32, DebugProbeError> {
+        if let PortType::AccessPort(port_number) = port {
+            self.select_ap(port_number as u8)?;
+        }
+
+        let port: u16 = port.into();
+
+        let cmd = vec![
+            commands::JTAG_COMMAND,
+            commands::JTAG_READ_DAP_REG,
+            (port & 0xFF) as u8,
+            ((port >> 8) & 0xFF) as u8,
+            (addr & 0xFF) as u8,
+            ((addr >> 8) & 0xFF) as u8,
+        ];
+        let mut buf = [0; 8];
+        self.send_jtag_command(cmd, &[], &mut buf, TIMEOUT)?;
+        // Unwrap is ok!
+        Ok((&buf[4..8]).pread_with(0, LE).unwrap())
+    }
+
+    /// Writes a value to the DAP register on the specified port and address.
+    fn write_register_once(
+        &mut self,
+        port: PortType,
+        addr: u16,
+        value: u32,
+    ) -> Result<(), DebugProbeError> {
+        if let PortType::AccessPort(port_number) = port {
+            self.select_ap(port_number as u8)?;
+        }
+
+        let port: u16 = port.into();
+
+        let cmd = vec![
+            commands::JTAG_COMMAND,
+            commands::JTAG_WRITE_DAP_REG,
+            (port & 0xFF) as u8,
+            ((port >> 8) & 0xFF) as u8,
+            (addr & 0xFF) as u8,
+            ((addr >> 8) & 0xFF) as u8,
+            (value & 0xFF) as u8,
+            ((value >> 8) & 0xFF) as u8,
+            ((value >> 16) & 0xFF) as u8,
+            ((value >> 24) & 0xFF) as u8,
+        ];
+        let mut buf = [0; 2];
+        self.send_jtag_command(cmd, &[], &mut buf, TIMEOUT)?;
+        Ok(())
+    }
 
     /// Reads the target voltage.
     /// For the china fake variants this will always read a nonzero value!
