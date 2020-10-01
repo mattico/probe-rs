@@ -6,6 +6,3 @@ members = [
     "cli",
     "gdb-server",
 ]
-
-[patch.crates-io]
-jaylink = { git = 'https://github.com/mattico/jaylink', branch = 'usbdk' }
